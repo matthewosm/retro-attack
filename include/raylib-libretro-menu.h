@@ -294,7 +294,11 @@ void UpdateLibretroMenu(void) {
     nk_console* currentActiveParent = nk_console_active_parent(menu.console);
     if (currentActiveParent != menu.lastActiveParent) {
         menu.lastBounds.h = 0;
-        nk_window_set_scroll(menu.ctx, "raylib-libretro", 0, 0);
+        // nk_window_set_scroll queues the reset via a command buffer that's consumed
+        // next frame, so the new page briefly shows stale scroll. Poke the window
+        // struct directly so the reset applies on the current frame.
+        struct nk_window* win = nk_window_find(menu.ctx, "raylib-libretro");
+        if (win) { win->scrollbar.x = 0; win->scrollbar.y = 0; }
         menu.lastActiveParent = currentActiveParent;
     }
 

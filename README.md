@@ -14,7 +14,25 @@ Both arguments are optional. Launching with no arguments brings up the in-app me
 
 ## Retro Roulette
 
-Retro Roulette turns the frontend into a randomized arcade: every 10 seconds it unloads the current game and boots a new random ROM picked from your RetroArch playlists.
+Retro Roulette is a two-player betting match played over 10 rounds of random ROMs from your RetroArch playlists. Each round: both players bet a coin, a random game boots for 10 seconds, a winner is picked, and the loser forfeits their bet. Highest score after 10 rounds wins.
+
+Each player starts with the same bank:
+
+| Coin   | Value | Count |
+| ---    | ---   | ---   |
+| Copper | 1     | 5     |
+| Silver | 3     | 3     |
+| Gold   | 5     | 2     |
+
+### Controls
+
+| Action            | 1P      | 2P      |
+| ---               | ---     | ---     |
+| Cycle bet left    | `A`     | `←`     |
+| Cycle bet right   | `D`     | `→`     |
+| Lock in bet       | `W`     | `↑`     |
+
+Once both players lock in, a countdown plays and the next random game loads. Opening the menu (`F1`) mid-match cancels it.
 
 ### Setup
 
@@ -26,12 +44,13 @@ Retro Roulette turns the frontend into a randomized arcade: every 10 seconds it 
    - **Linux:** `~/.config/retroarch/playlists`
    - **macOS:** `~/Library/Application Support/RetroArch/playlists`
 4. The picked path is saved to `raylib-libretro-config.txt` next to the executable. On every launch the configured folder is rescanned and ROMs whose files no longer exist are skipped automatically.
-5. Back out to the main menu and click **Start Roulette**. The first random game loads instantly; each subsequent game loads after a 10-second timer. Open the menu (`F1`) at any point to stop the roulette and stay on the current game.
+5. Back out to the main menu and click **Start Roulette** to begin a match.
 
 ### Notes
 
 - Library entries inherit the `default_core_path` from each `.lpl` (any per-entry `core_path` of `"DETECT"` falls through to the default). Make sure each playlist's default core points at a real `*_libretro` shared library.
-- The roulette interval is currently fixed at 10 seconds (`ROULETTE_INTERVAL_SECONDS` in [`bin/raylib-libretro.c`](bin/raylib-libretro.c)).
+- Match constants (round count, play-time per game, coin values) are defined at the top of [`bin/raylib-libretro.c`](bin/raylib-libretro.c).
+- The between-round screen uses fonts and coin art from `bin/resources/`. If those files are missing the frontend falls back to the default raylib font and flat-colored coin discs.
 
 ## Controls
 
