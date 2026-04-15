@@ -38,6 +38,8 @@
 
 #include "../vendor/raylib-nuklear/include/raylib-nuklear.h"
 #include "../vendor/nuklear_console/nuklear_console.h"
+#include "raylib-libretro-config.h"
+#include "raylib-libretro-playlist.h"
 
 typedef enum LibretroMenuStyle {
     LIBRETRO_MENU_STYLE_DEFAULT,
@@ -51,6 +53,11 @@ typedef struct LibretroMenu {
     bool active;
     struct nk_rect lastBounds;
     nk_bool fullscreen;
+    LibretroConfig config;
+    LibretroPlaylistLibrary library;
+    char playlistsDirBuffer[LIBRETRO_CONFIG_PATH_MAX];
+    bool rouletteRequested;
+    nk_console* lastActiveParent;
 } LibretroMenu;
 
 #if defined(__cplusplus)
@@ -85,6 +92,12 @@ void DrawLibretroMenu(void);
 #define NK_CONSOLE_MALLOC nk_raylib_malloc
 #define NK_CONSOLE_FREE nk_raylib_mfree
 #include "../vendor/nuklear_console/nuklear_console.h"
+
+#define RAYLIB_LIBRETRO_CONFIG_IMPLEMENTATION
+#include "raylib-libretro-config.h"
+
+#define RAYLIB_LIBRETRO_PLAYLIST_IMPLEMENTATION
+#include "raylib-libretro-playlist.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -167,6 +180,21 @@ static void LibretroMenuFullscreenChanged(nk_console* widget, void* user_data) {
     ToggleFullscreen();
 }
 
+static void LibretroMenuStartRouletteClicked(nk_console* widget, void* user_data) {
+    (void)widget;
+    (void)user_data;
+    menu.rouletteRequested = true;
+    menu.active = false;
+}
+
+static void LibretroMenuPlaylistsDirChanged(nk_console* widget, void* user_data) {
+    (void)widget;
+    (void)user_data;
+    TextCopy(menu.config.playlistsDir, menu.playlistsDirBuffer);
+    SaveLibretroConfig(&menu.config);
+    LoadLibretroPlaylistLibrary(&menu.library, menu.config.playlistsDir);
+}
+
 LibretroMenu* InitLibretroMenu(void) {
     menu = (LibretroMenu){0};
     menu.font = LoadFontFromNuklear(52);
@@ -188,7 +216,16 @@ LibretroMenu* InitLibretroMenu(void) {
         return NULL;
     }
 
+    // Load persisted settings + game library before we build the menu so the
+    // folder picker can show the current value.
+    LoadLibretroConfig(&menu.config);
+    TextCopy(menu.playlistsDirBuffer, menu.config.playlistsDir);
+    if (menu.config.playlistsDir[0] != '\0') {
+        LoadLibretroPlaylistLibrary(&menu.library, menu.config.playlistsDir);
+    }
+
     // Build the Menu
+    nk_console_button_onclick(menu.console, "Start Roulette", &LibretroMenuStartRouletteClicked);
     nk_console_button(menu.console, "Load Game");
     nk_console_button(menu.console, "Options");
     menu.fullscreen = (nk_bool)IsWindowFullscreen();
@@ -196,6 +233,8 @@ LibretroMenu* InitLibretroMenu(void) {
     {
         nk_console* fullscreenCheckbox = nk_console_checkbox(settings, "Fullscreen", &menu.fullscreen);
         nk_console_add_event(fullscreenCheckbox, NK_CONSOLE_EVENT_CHANGED, LibretroMenuFullscreenChanged);
+        nk_console* playlistsDir = nk_console_dir(settings, "Playlists Folder", menu.playlistsDirBuffer, (int)sizeof(menu.playlistsDirBuffer));
+        nk_console_add_event(playlistsDir, NK_CONSOLE_EVENT_CHANGED, LibretroMenuPlaylistsDirChanged);
         nk_console_button_onclick(settings, "Back", &nk_console_button_back);
     }
     nk_console_button(menu.console, "Save State");
@@ -212,6 +251,8 @@ void CloseLibretroMenu(void) {
     if (menu.ctx == NULL) {
         return;
     }
+
+    FreeLibretroPlaylistLibrary(&menu.library);
 
     if (menu.console != NULL) {
         nk_console_free(menu.console);
@@ -244,6 +285,18 @@ void UpdateLibretroMenu(void) {
 
     // Keep fullscreen checkbox in sync with the actual window state (e.g. F11 presses).
     menu.fullscreen = (nk_bool)IsWindowFullscreen();
+
+    // When the active submenu changes, reset the cached window height and
+    // scroll offset so the newly displayed parent gets auto-sized from scratch
+    // and starts scrolled to the top — otherwise navigating back from a short
+    // submenu leaves the tall parent menu clipped with the first items scrolled
+    // out of view.
+    nk_console* currentActiveParent = nk_console_active_parent(menu.console);
+    if (currentActiveParent != menu.lastActiveParent) {
+        menu.lastBounds.h = 0;
+        nk_window_set_scroll(menu.ctx, "raylib-libretro", 0, 0);
+        menu.lastActiveParent = currentActiveParent;
+    }
 
     // Render the console centered in the screen, using last frame's bounds for height
     struct nk_rect windowPos;

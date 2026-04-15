@@ -42,7 +42,65 @@
 
 typedef struct {
     LibretroMenu* menu;
+    bool rouletteActive;
+    double nextSwitchTime;
 } AppData;
+
+#define ROULETTE_INTERVAL_SECONDS 10.0
+#define ROULETTE_MAX_RETRIES 5
+
+static int PickRouletteCandidate(LibretroPlaylistLibrary* lib) {
+    int available = 0;
+    for (int i = 0; i < lib->count; i++) {
+        if (!lib->entries[i].blacklisted) available++;
+    }
+    if (available <= 0) return -1;
+
+    int target = GetRandomValue(0, available - 1);
+    for (int i = 0; i < lib->count; i++) {
+        if (lib->entries[i].blacklisted) continue;
+        if (target == 0) return i;
+        target--;
+    }
+    return -1;
+}
+
+static void LoadRandomRouletteGame(AppData* data) {
+    LibretroPlaylistLibrary* lib = &data->menu->library;
+    if (lib->count <= 0) {
+        data->rouletteActive = false;
+        return;
+    }
+
+    UnloadLibretroGame();
+    CloseLibretro();
+
+    for (int i = 0; i < ROULETTE_MAX_RETRIES; i++) {
+        int idx = PickRouletteCandidate(lib);
+        if (idx < 0) {
+            TraceLog(LOG_WARNING, "ROULETTE: all entries blacklisted, stopping");
+            data->rouletteActive = false;
+            return;
+        }
+        LibretroPlaylistEntry* pick = &lib->entries[idx];
+        TraceLog(LOG_INFO, "ROULETTE: %s (core: %s)", pick->label, pick->corePath);
+
+        if (!InitLibretro(pick->corePath)) {
+            TraceLog(LOG_ERROR, "ROULETTE: InitLibretro failed, blacklisting %s", pick->path);
+            pick->blacklisted = true;
+            continue;
+        }
+        if (!LoadLibretroGame(pick->path)) {
+            TraceLog(LOG_ERROR, "ROULETTE: LoadLibretroGame failed, blacklisting %s", pick->path);
+            pick->blacklisted = true;
+            CloseLibretro();
+            continue;
+        }
+        return;
+    }
+
+    TraceLog(LOG_WARNING, "ROULETTE: gave up after %d failed attempts", ROULETTE_MAX_RETRIES);
+}
 
 bool Init(void** userData, int argc, char** argv) {
     SetWindowMinSize(400, 300);
@@ -83,8 +141,29 @@ bool UpdateDrawFrame(void* userData) {
     // Update the shaders.
     UpdateLibretroShaders(GetFrameTime());
 
+    // Start roulette when the menu button was clicked last frame.
+    if (data->menu->rouletteRequested) {
+        data->menu->rouletteRequested = false;
+        if (data->menu->library.count > 0) {
+            data->rouletteActive = true;
+            data->nextSwitchTime = 0.0;
+        } else {
+            TraceLog(LOG_WARNING, "ROULETTE: no games in library — set Playlists Folder in Settings first");
+        }
+    }
+
+    // Opening the menu while roulette is active stops auto-switching.
+    if (data->rouletteActive && data->menu->active) {
+        data->rouletteActive = false;
+    }
+
+    if (data->rouletteActive && GetTime() >= data->nextSwitchTime) {
+        data->nextSwitchTime = GetTime() + ROULETTE_INTERVAL_SECONDS;
+        LoadRandomRouletteGame(data);
+    }
+
     // Run a frame of the core.
-    if (!data->menu->active) {
+    if (!data->menu->active && IsLibretroReady()) {
         UpdateLibretro();
     }
 
