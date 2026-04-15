@@ -31,6 +31,8 @@ raylib-libretro/
 │   ├── raylib-libretro-menu.h    # Nuklear-based menu UI
 │   ├── raylib-libretro-shaders.h # Post-process shader system
 │   ├── raylib-libretro-vfs.h     # Virtual file system
+│   ├── raylib-libretro-config.h  # Persisted frontend settings (text file)
+│   ├── raylib-libretro-playlist.h# RetroArch .lpl playlist parser / game library
 │   └── raylib-libretro-shaders/  # 28 GLSL shader source files (100/120/330)
 ├── lib/
 │   ├── CMakeLists.txt
@@ -190,6 +192,28 @@ GLSL sources are embedded directly in the header as string literals, with multip
 
 ---
 
+## Playlists & Roulette Mode
+
+The frontend can scan a RetroArch playlists directory and auto-switch between random games ("roulette mode").
+
+**Headers:**
+- `raylib-libretro-config.h` — `LoadLibretroConfig` / `SaveLibretroConfig`. Persists a single `playlistsDir` setting to `raylib-libretro-config.txt` via `SaveFileText`.
+- `raylib-libretro-playlist.h` — `LoadLibretroPlaylistLibrary(lib, dir)` recursively scans `*.lpl` files via `LoadDirectoryFilesEx` and parses them with a bounds-safe hand-rolled JSON reader (no null-termination required). Each `LibretroPlaylistEntry` carries `path`, `label`, `corePath`, and a session-only `blacklisted` flag. `core_path == "DETECT"` falls through to the playlist's `default_core_path`.
+
+**Menu integration** (`raylib-libretro-menu.h`):
+- `LibretroMenu` owns the `LibretroConfig` and `LibretroPlaylistLibrary`.
+- Settings → "Playlists Folder" uses `nk_console_dir` bound to `playlistsDirBuffer`; on change, the library is reloaded and config saved.
+- "Start Roulette" sets `menu.rouletteRequested` and closes the menu. Opening the menu while active cancels roulette.
+
+**Roulette loop** (`bin/raylib-libretro.c`):
+- Switches every `ROULETTE_INTERVAL_SECONDS` (10s).
+- `LoadRandomRouletteGame` calls `UnloadLibretroGame` + `CloseLibretro`, then tries up to `ROULETTE_MAX_RETRIES` random picks. Any entry whose `InitLibretro` or `LoadLibretroGame` fails is marked `blacklisted` in-memory so it won't be picked again this session.
+- `UpdateLibretro()` is gated on `IsLibretroReady()` so a failed switch doesn't crash the main loop.
+
+Blacklist is **not** persisted — reloading the library (via Settings) clears it.
+
+---
+
 ## Build System
 
 ### Prerequisites
@@ -316,7 +340,10 @@ When making changes, these are the most important files to understand:
 |------|---------------|
 | `include/raylib-libretro.h` | The entire library implementation — all callbacks, mappings, audio ring buffer |
 | `include/raylib-libretro-shaders.h` | Shader types, GLSL sources, parameter structs, cycling logic |
-| `bin/raylib-libretro.c` | Full app using `raylib-app` lifecycle callbacks |
+| `include/raylib-libretro-menu.h` | Nuklear menu, settings, roulette trigger, owns config + playlist library |
+| `include/raylib-libretro-playlist.h` | `.lpl` parser and in-memory game library |
+| `include/raylib-libretro-config.h` | Persisted settings (currently just `playlistsDir`) |
+| `bin/raylib-libretro.c` | Full app using `raylib-app` lifecycle callbacks; roulette loop lives here |
 | `example/raylib-libretro-basic.c` | Canonical minimal usage — good reference for the expected API flow |
 | `CMakeLists.txt` | Dependency resolution and build options |
 | `TASKS.md` | Planned features — check here before implementing something to see if it's already scoped |
